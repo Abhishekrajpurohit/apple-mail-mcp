@@ -121,10 +121,11 @@ class TestAppleMailConnector:
 
         # Verify the script includes filter conditions
         call_args = mock_run.call_args[0][0]
-        assert 'sender contains "john@example.com"' in call_args
-        assert 'subject contains "meeting"' in call_args
-        assert "read status is false" in call_args
-        assert "items 1 thru 10" in call_args
+        assert 'sender of msg contains "john@example.com"' in call_args
+        assert 'subject of msg contains "meeting"' in call_args
+        assert "read status of msg is false" in call_args
+        # Optimized implementation exits early when limit is reached
+        assert "if matchCount >= 10 then exit repeat" in call_args
 
     @patch.object(AppleMailConnector, "_run_applescript")
     def test_get_message(
@@ -180,6 +181,50 @@ class TestAppleMailConnector:
         assert "bcc@example.com" in call_args
 
     @patch.object(AppleMailConnector, "_run_applescript")
+    def test_create_draft_basic(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Test creating a basic draft."""
+        mock_run.return_value = "draft_12345"
+
+        result = connector.create_draft(
+            subject="Draft Test",
+            body="Draft body",
+            to=["recipient@example.com"]
+        )
+
+        assert result == "draft_12345"
+
+        # Verify script calls save but not send command
+        call_args = mock_run.call_args[0][0]
+        assert "save" in call_args
+        assert "\n                send\n" not in call_args  # Check for send as standalone command
+        assert "Draft Test" in call_args
+
+    @patch.object(AppleMailConnector, "_run_applescript")
+    def test_create_draft_with_cc_bcc(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Test creating draft with CC and BCC."""
+        mock_run.return_value = "draft_12346"
+
+        result = connector.create_draft(
+            subject="Draft Test",
+            body="Draft body",
+            to=["recipient@example.com"],
+            cc=["cc@example.com"],
+            bcc=["bcc@example.com"]
+        )
+
+        assert result == "draft_12346"
+
+        # Verify script includes all recipients
+        call_args = mock_run.call_args[0][0]
+        assert "recipient@example.com" in call_args
+        assert "cc@example.com" in call_args
+        assert "bcc@example.com" in call_args
+
+    @patch.object(AppleMailConnector, "_run_applescript")
     def test_mark_as_read(
         self, mock_run: MagicMock, connector: AppleMailConnector
     ) -> None:
@@ -209,3 +254,29 @@ class TestAppleMailConnector:
         """Test marking with empty list."""
         result = connector.mark_as_read([])
         assert result == 0
+
+    @patch.object(AppleMailConnector, "_run_applescript")
+    def test_list_accounts(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Test listing all email accounts."""
+        mock_run.return_value = "Gmail|gmail@example.com\niCloud|icloud@example.com"
+
+        result = connector.list_accounts()
+
+        assert len(result) == 2
+        assert result[0]["name"] == "Gmail"
+        assert result[0]["email"] == "gmail@example.com"
+        assert result[1]["name"] == "iCloud"
+        assert result[1]["email"] == "icloud@example.com"
+
+    @patch.object(AppleMailConnector, "_run_applescript")
+    def test_list_accounts_empty(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Test listing accounts when none exist."""
+        mock_run.return_value = ""
+
+        result = connector.list_accounts()
+
+        assert len(result) == 0

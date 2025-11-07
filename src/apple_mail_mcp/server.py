@@ -36,6 +36,58 @@ mail = AppleMailConnector()
 
 
 @mcp.tool()
+def list_accounts() -> dict[str, Any]:
+    """
+    List all email accounts configured in Apple Mail.
+
+    Returns:
+        Dictionary containing list of accounts with names and primary email addresses
+
+    Example:
+        >>> list_accounts()
+        {
+            "success": True,
+            "accounts": [
+                {"name": "Gmail", "email": "user@gmail.com"},
+                {"name": "iCloud", "email": "user@icloud.com"}
+            ],
+            "count": 2
+        }
+    """
+    try:
+        logger.info("Listing all email accounts")
+
+        accounts = mail.list_accounts()
+
+        operation_logger.log_operation(
+            "list_accounts",
+            {},
+            "success"
+        )
+
+        return {
+            "success": True,
+            "accounts": accounts,
+            "count": len(accounts),
+        }
+
+    except MailAppleScriptError as e:
+        logger.error(f"Error listing accounts: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "applescript_error",
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error listing accounts: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
+@mcp.tool()
 def list_mailboxes(account: str) -> dict[str, Any]:
     """
     List all mailboxes for an account.
@@ -318,6 +370,90 @@ def send_email(
         }
     except Exception as e:
         logger.error(f"Unexpected error sending email: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
+@mcp.tool()
+def create_draft(
+    subject: str,
+    body: str,
+    to: list[str],
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Create a draft email without sending.
+
+    Args:
+        subject: Email subject
+        body: Email body (plain text)
+        to: List of recipient email addresses
+        cc: List of CC recipients (optional)
+        bcc: List of BCC recipients (optional)
+
+    Returns:
+        Dictionary with success status and draft message ID
+
+    Example:
+        >>> create_draft(
+        ...     subject="Meeting Notes",
+        ...     body="Draft of meeting notes...",
+        ...     to=["alice@example.com"]
+        ... )
+        {"success": True, "draft_id": "draft_12345", "message": "Draft created successfully"}
+    """
+    try:
+        # Validate operation
+        is_valid, error_msg = validate_send_operation(to, cc, bcc)
+        if not is_valid:
+            logger.error(f"Validation failed: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "validation_error",
+            }
+
+        logger.info(f"Creating draft: {subject}")
+        logger.info(f"Recipients: {to}, CC: {cc}, BCC: {bcc}")
+
+        # Create the draft
+        draft_id = mail.create_draft(
+            subject=subject,
+            body=body,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+        )
+
+        operation_logger.log_operation(
+            "create_draft",
+            {"subject": subject, "to": to, "cc": cc, "bcc": bcc},
+            "success"
+        )
+
+        return {
+            "success": True,
+            "draft_id": draft_id,
+            "message": "Draft created successfully",
+            "details": {
+                "subject": subject,
+                "recipients": len(to) + len(cc or []) + len(bcc or []),
+            },
+        }
+
+    except MailAppleScriptError as e:
+        logger.error(f"AppleScript error creating draft: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "applescript_error",
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error creating draft: {e}")
         return {
             "success": False,
             "error": str(e),

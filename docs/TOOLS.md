@@ -4,10 +4,57 @@ Complete reference for all MCP tools provided by the Apple Mail MCP server.
 
 ## Overview
 
-**Current Version:** v0.3.0 (Phase 3)
-**Total Tools:** 14 (5 from Phase 1 + 7 from Phase 2 + 2 from Phase 3)
+**Current Version:** v0.3.1 (Phase 3+)
+**Total Tools:** 16 (6 from Phase 1 + 7 from Phase 2 + 2 from Phase 3 + 1 new)
 
 ## Phase 1 Tools (v0.1.0) - Core Foundation
+
+### list_accounts
+
+List all email accounts configured in Apple Mail.
+
+**Parameters:**
+
+None
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "accounts": [
+    {
+      "name": "Gmail",
+      "email": "user@gmail.com"
+    },
+    {
+      "name": "iCloud",
+      "email": "user@icloud.com"
+    }
+  ],
+  "count": 2
+}
+```
+
+**Examples:**
+
+```python
+# List all configured accounts
+list_accounts()
+```
+
+**Error Codes:**
+
+- `applescript_error`: AppleScript execution failed
+- `unknown`: Unexpected error occurred
+
+**Use Cases:**
+
+- Discover available email accounts before performing operations
+- Validate account names before searching or sending emails
+- Display account options to users
+
+---
 
 ### search_messages
 
@@ -189,6 +236,82 @@ send_email(
 - `cancelled`: User cancelled the send operation
 - `send_error`: Mail.app failed to send the email
 - `unknown`: Unexpected error occurred
+
+---
+
+### create_draft
+
+Create a draft email without sending it.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `subject` | string | Yes | - | Email subject line |
+| `body` | string | Yes | - | Email body (plain text) |
+| `to` | array[string] | Yes | - | List of recipient email addresses |
+| `cc` | array[string] | No | [] | List of CC recipients |
+| `bcc` | array[string] | No | [] | List of BCC recipients |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "draft_id": "draft_12345",
+  "message": "Draft created successfully",
+  "details": {
+    "subject": "Meeting Notes",
+    "recipients": 2
+  }
+}
+```
+
+**Examples:**
+
+```python
+# Simple draft
+create_draft(
+    subject="Meeting Notes",
+    body="Draft of notes from today's meeting...",
+    to=["team@company.com"]
+)
+
+# Draft with CC
+create_draft(
+    subject="Proposal Draft",
+    body="Here's a draft of the proposal...",
+    to=["client@example.com"],
+    cc=["manager@company.com"]
+)
+
+# Draft for review
+create_draft(
+    subject="Article for Review",
+    body="Please review this article before I send it out.",
+    to=["editor@publication.com"]
+)
+```
+
+**Validation Rules:**
+
+- At least one `to` recipient required
+- Maximum 100 total recipients (to + cc + bcc)
+- All email addresses must be valid format
+- Draft is saved to Drafts folder in Mail.app
+
+**Error Codes:**
+
+- `validation_error`: Invalid recipients or parameters
+- `applescript_error`: Mail.app failed to create the draft
+- `unknown`: Unexpected error occurred
+
+**Use Cases:**
+
+- Compose emails for later review before sending
+- Save work-in-progress messages
+- Create email templates
+- Prepare responses that need approval
 
 ---
 

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "apple-mail": {
+      "command": "/Users/abhishekrajpurohit/MCPS/apple-mail-mcp/venv/bin/python",
+      "args": ["-m", "apple_mail_mcp.server"]
+    }
+  }
+}

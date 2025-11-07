@@ -2,6 +2,8 @@
 AppleScript-based connector for Apple Mail.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import subprocess
@@ -90,24 +92,36 @@ class AppleMailConnector:
 
         Returns:
             List of account dictionaries with name and email addresses
+
+        Raises:
+            MailAppleScriptError: If script execution fails
+
+        Example:
+            >>> connector.list_accounts()
+            [{"name": "Gmail", "email": "user@gmail.com"}, ...]
         """
         script = """
         tell application "Mail"
-            set accountList to {}
+            set resultList to {}
+
             repeat with acc in accounts
-                set accountInfo to {accountName:(name of acc), emailAddresses:(email addresses of acc)}
-                set end of accountList to accountInfo
+                set accName to name of acc
+                set emailAddrs to email addresses of acc
+
+                -- Get primary email (first in list)
+                set primaryEmail to ""
+                if (count of emailAddrs) > 0 then
+                    set primaryEmail to item 1 of emailAddrs
+                end if
+
+                set accData to accName & "|" & primaryEmail
+                set end of resultList to accData
             end repeat
 
-            -- Convert to JSON-like format
-            set output to ""
-            repeat with acc in accountList
-                set output to output & "{name:'" & accountName of acc & "',emails:["
-                repeat with addr in emailAddresses of acc
-                    set output to output & "'" & addr & "',"
-                end repeat
-                set output to output & "]}|"
-            end repeat
+            -- Join with newlines
+            set AppleScript's text item delimiters to linefeed
+            set output to resultList as text
+            set AppleScript's text item delimiters to ""
 
             return output
         end tell
@@ -117,12 +131,16 @@ class AppleMailConnector:
 
         # Parse the result
         accounts = []
-        for account_str in result.split("|"):
-            if not account_str:
-                continue
-            # Simple parsing - in production, use more robust parsing
-            # For now, we'll return raw result and handle in tools
-            accounts.append({"raw": account_str})
+        if result:
+            for line in result.split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    accounts.append({
+                        "name": parts[0],
+                        "email": parts[1],
+                    })
 
         return accounts
 
@@ -205,14 +223,128 @@ class AppleMailConnector:
             status = "true" if read_status else "false"
             conditions.append(f"read status is {status}")
 
-        whose_clause = " and ".join(conditions) if conditions else "true"
-        limit_clause = f"items 1 thru {limit} of" if limit else ""
+        # Build filter conditions for inline checking
+        filter_checks = []
+        if sender_contains:
+            sender_safe = escape_applescript_string(sanitize_input(sender_contains))
+            filter_checks.append(f'(sender of msg contains "{sender_safe}")')
 
-        script = f"""
+        if subject_contains:
+            subject_safe = escape_applescript_string(sanitize_input(subject_contains))
+            filter_checks.append(f'(subject of msg contains "{subject_safe}")')
+
+        if read_status is not None:
+            status = "true" if read_status else "false"
+            filter_checks.append(f"(read status of msg is {status})")
+
+        # When we have a limit, process messages one by one with early exit
+        # This avoids loading all messages into memory first
+        if limit and filter_checks:
+            # With limit and filters: iterate through all messages, check conditions inline
+            filter_condition = " and ".join(filter_checks)
+            script = f"""
         tell application "Mail"
             set accountRef to account "{account_safe}"
             set mailboxRef to mailbox "{mailbox_safe}" of accountRef
-            set matchedMessages to {limit_clause} (messages of mailboxRef whose {whose_clause})
+
+            set resultList to {{}}
+            set matchCount to 0
+
+            repeat with msg in (messages of mailboxRef)
+                -- Check if message matches all filter conditions
+                if {filter_condition} then
+                    set matchCount to matchCount + 1
+
+                    set msgId to id of msg as text
+                    set msgSubject to subject of msg
+                    set msgSender to sender of msg
+                    set msgDate to date received of msg as text
+                    set msgRead to read status of msg
+
+                    set msgData to msgId & "|" & msgSubject & "|" & msgSender & "|" & msgDate & "|" & msgRead
+                    set end of resultList to msgData
+
+                    if matchCount >= {limit} then exit repeat
+                end if
+            end repeat
+
+            -- Join with newlines
+            set AppleScript's text item delimiters to linefeed
+            set output to resultList as text
+            set AppleScript's text item delimiters to ""
+
+            return output
+        end tell
+        """
+        elif limit:
+            # With limit but no filters: get first N messages directly
+            script = f"""
+        tell application "Mail"
+            set accountRef to account "{account_safe}"
+            set mailboxRef to mailbox "{mailbox_safe}" of accountRef
+
+            set allMessages to messages of mailboxRef
+            set msgCount to count of allMessages
+            if msgCount > {limit} then set msgCount to {limit}
+
+            set resultList to {{}}
+            repeat with i from 1 to msgCount
+                set msg to item i of allMessages
+
+                set msgId to id of msg as text
+                set msgSubject to subject of msg
+                set msgSender to sender of msg
+                set msgDate to date received of msg as text
+                set msgRead to read status of msg
+
+                set msgData to msgId & "|" & msgSubject & "|" & msgSender & "|" & msgDate & "|" & msgRead
+                set end of resultList to msgData
+            end repeat
+
+            -- Join with newlines
+            set AppleScript's text item delimiters to linefeed
+            set output to resultList as text
+            set AppleScript's text item delimiters to ""
+
+            return output
+        end tell
+        """
+        elif filter_checks:
+            # No limit but with filters: use whose clause for efficiency
+            whose_clause = " and ".join(conditions)
+            script = f"""
+        tell application "Mail"
+            set accountRef to account "{account_safe}"
+            set mailboxRef to mailbox "{mailbox_safe}" of accountRef
+            set matchedMessages to (messages of mailboxRef whose {whose_clause})
+
+            set resultList to {{}}
+            repeat with msg in matchedMessages
+                set msgId to id of msg as text
+                set msgSubject to subject of msg
+                set msgSender to sender of msg
+                set msgDate to date received of msg as text
+                set msgRead to read status of msg
+
+                set msgData to msgId & "|" & msgSubject & "|" & msgSender & "|" & msgDate & "|" & msgRead
+                set end of resultList to msgData
+            end repeat
+
+            -- Join with newlines
+            set AppleScript's text item delimiters to linefeed
+            set output to resultList as text
+            set AppleScript's text item delimiters to ""
+
+            return output
+        end tell
+        """
+        else:
+            # No limit and no filters: get all messages
+            script = f"""
+        tell application "Mail"
+            set accountRef to account "{account_safe}"
+            set mailboxRef to mailbox "{mailbox_safe}" of accountRef
+            set matchedMessages to messages of mailboxRef
 
             set resultList to {{}}
             repeat with msg in matchedMessages
@@ -380,6 +512,71 @@ class AppleMailConnector:
 
         result = self._run_applescript(script)
         return result == "sent"
+
+    def create_draft(
+        self,
+        subject: str,
+        body: str,
+        to: list[str],
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+    ) -> str:
+        """
+        Create a draft email without sending.
+
+        Args:
+            subject: Email subject
+            body: Email body
+            to: List of To recipients
+            cc: List of CC recipients
+            bcc: List of BCC recipients
+
+        Returns:
+            Draft message ID
+
+        Raises:
+            MailAppleScriptError: If draft creation fails
+        """
+        subject_safe = escape_applescript_string(sanitize_input(subject))
+        body_safe = escape_applescript_string(sanitize_input(body))
+
+        # Build recipient lists
+        to_list = ", ".join(f'"{escape_applescript_string(addr)}"' for addr in to)
+        cc_list = ", ".join(f'"{escape_applescript_string(addr)}"' for addr in (cc or []))
+        bcc_list = ", ".join(f'"{escape_applescript_string(addr)}"' for addr in (bcc or []))
+
+        script = f"""
+        tell application "Mail"
+            set theMessage to make new outgoing message with properties {{subject:"{subject_safe}", content:"{body_safe}", visible:false}}
+
+            tell theMessage
+                -- Add To recipients
+                repeat with addr in {{{to_list}}}
+                    make new to recipient with properties {{address:addr}}
+                end repeat
+
+                -- Add CC recipients
+                repeat with addr in {{{cc_list}}}
+                    make new cc recipient with properties {{address:addr}}
+                end repeat
+
+                -- Add BCC recipients
+                repeat with addr in {{{bcc_list}}}
+                    make new bcc recipient with properties {{address:addr}}
+                end repeat
+
+                -- Save as draft (don't send)
+                save
+            end tell
+
+            -- Return the message ID
+            set msgId to id of theMessage as text
+            return "draft_" & msgId
+        end tell
+        """
+
+        result = self._run_applescript(script)
+        return result
 
     def mark_as_read(self, message_ids: list[str], read: bool = True) -> int:
         """
